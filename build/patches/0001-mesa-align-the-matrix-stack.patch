@@ -1,0 +1,57 @@
+mesa: allocate the matrix stack with the alignment GLmatrix needs
+
+GLmatrix has 16-byte aligned members, but the matrix stack was allocated
+with calloc() and grown with realloc(), which only guarantee 8-byte
+alignment on 32-bit platforms. Clang uses 16-byte aligned NEON stores
+(vst1.64 [rN:128]) to initialise the matrices, so on 32-bit ARM the driver
+died with SIGBUS (alignment exception) when a GL context was created.
+GCC builds of the same code run fine on 32-bit ARM, which is why this
+went unnoticed.
+
+Use align_calloc(), align_realloc() and align_free() for the stack, like
+gl_context itself is already allocated with align_malloc().
+
+--- a/src/mesa/main/matrix.c
++++ b/src/mesa/main/matrix.c
+@@ -44,6 +44,7 @@
+ #include "mtypes.h"
+ #include "math/m_matrix.h"
+ #include "util/bitscan.h"
++#include "util/u_memory.h"
+ #include "api_exec_decl.h"
+ 
+ 
+@@ -311,8 +312,13 @@
+    if (stack->Depth + 1 >= stack->StackSize) {
+       unsigned new_stack_size = stack->StackSize * 2;
+       unsigned i;
+-      GLmatrix *new_stack = realloc(stack->Stack,
+-                                    sizeof(*new_stack) * new_stack_size);
++      /* GLmatrix needs 16-byte alignment, more than malloc guarantees on
++       * 32-bit platforms
++       */
++      GLmatrix *new_stack = align_realloc(stack->Stack,
++                                          sizeof(*new_stack) * stack->StackSize,
++                                          sizeof(*new_stack) * new_stack_size,
++                                          alignof(GLmatrix));
+ 
+       if (!new_stack) {
+          _mesa_error(ctx, GL_OUT_OF_MEMORY, "%s", func);
+@@ -1008,7 +1014,7 @@
+    stack->MaxDepth = maxDepth;
+    stack->DirtyFlag = dirtyFlag;
+    /* The stack will be dynamically resized at glPushMatrix() time */
+-   stack->Stack = calloc(1, sizeof(GLmatrix));
++   stack->Stack = align_calloc(sizeof(GLmatrix), alignof(GLmatrix));
+    stack->StackSize = 1;
+    _math_matrix_ctr(&stack->Stack[0]);
+    stack->Top = stack->Stack;
+@@ -1023,7 +1029,7 @@
+ static void
+ free_matrix_stack( struct gl_matrix_stack *stack )
+ {
+-   free(stack->Stack);
++   align_free(stack->Stack);
+    stack->Stack = stack->Top = NULL;
+    stack->StackSize = 0;
+ }

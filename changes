@@ -1,0 +1,14 @@
+v1.0~3:
+	add disable_overscan=1 to the config.txt block: with KMS the firmware
+	otherwise passes 48 pixel margins, a black border on HDMI displays.
+	An older block is replaced when the package is updated (reboot needed)
+
+v1.0~2:
+	fix gui-v2 crashing (SIGBUS, alignment exception) right after start: the
+	vc4 driver is rebuilt with a mesa fix that allocates the GL matrix stack
+	16-byte aligned (build/patches/0001-mesa-align-the-matrix-stack.patch)
+
+v1.0~1:
+	first beta: vc4 KMS overlay, mesa vc4 driver, Qt eglfs configuration,
+	display-hotplug fix, gui-v2 from the Victron feed and a start-gui service
+	for the Raspberry Pi 2 / 3 / Zero 2 W (machine raspberrypi2)

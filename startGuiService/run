@@ -1,0 +1,33 @@
+#!/bin/sh
+# start-gui service installed by the RpiGuiV2 package (marker: RpiGuiV2)
+#
+# Starts gui-v2 when it is selected in the settings (/Settings/Gui/RunningVersion = 2),
+# gui-v2 is installed and a display is connected through the vc4 KMS driver.
+# Otherwise it starts gui-v1, e.g. before the reboot that activates the vc4 overlay.
+
+echo "*** starting start-gui (RpiGuiV2) ***"
+exec 2>&1
+. /etc/profile.d/profile.sh
+
+# make sure the setting exists (default gui-v1); this also waits for localsettings
+until dbus-send --system --print-reply --dest=com.victronenergy.settings /Settings \
+        com.victronenergy.Settings.AddSetting string:Gui string:RunningVersion \
+        variant:int32:1 string:i variant:int32:1 variant:int32:2 > /dev/null 2>&1; do
+    sleep 1
+done
+
+guiVersion=$(dbus-send --system --print-reply --dest=com.victronenergy.settings \
+        /Settings/Gui/RunningVersion com.victronenergy.BusItem.GetValue | awk '/variant/ { print $3 }')
+guiV2=/opt/victronenergy/gui-v2/venus-gui-v2
+
+if [ "$guiVersion" = 2 ] && [ -x "$guiV2" ] && grep -qsx connected /sys/class/drm/card*-*/status; then
+    echo "starting gui-v2"
+    . /etc/profile.d/qt6.sh
+    exec softlimit -d 768000000 -s 1000000 -a 768000000 "$guiV2"
+fi
+
+if [ "$guiVersion" = 2 ]; then
+    echo "gui-v2 selected but not installed yet or no KMS display connected - starting gui-v1"
+fi
+limit=$(( $(awk '/MemTotal/ { print $2 }' /proc/meminfo) * 1024 ))
+exec softlimit -d $limit -s 1000000 -a $limit nice -n -15 /opt/victronenergy/gui/start-gui.sh

@@ -1,0 +1,5 @@
+/u-boot/overlays/vc4-kms-v3d.dtbo
+/u-boot/overlays/vc4-kms-dsi-7inch.dtbo
+/usr/lib/dri/vc4_dri.so
+/etc/profile.d/qt6.sh
+/etc/qt-kms.conf

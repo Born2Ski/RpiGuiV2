@@ -1,0 +1,143 @@
+#!/bin/bash
+#
+# Installs gui-v2 and the Qt plugins it needs from the Victron package feed that
+# matches the running Venus OS version.
+#
+# Runs from the RpiGuiV2Installer service, so the SetupHelper setup script stays
+# quick and the install is retried until the network is up, e.g. right after a
+# firmware update. When done (or when the install must not happen) the service
+# stops itself; it runs again at the next boot and then only checks.
+#
+# The packages added are recorded in $installedPackagesFile so the setup script
+# can remove exactly those when RpiGuiV2 is uninstalled. That file is in /etc,
+# so a firmware update clears it together with the packages themselves.
+
+installedPackagesFile="/etc/venus/RpiGuiV2-installedPackages"
+venusConf="/etc/opkg/venus.conf"
+savedConf="/etc/opkg/venus.conf.RpiGuiV2"
+service="/service/RpiGuiV2Installer"
+retryDelay=300
+child=""
+workDir=$(mktemp -d)
+
+restoreFeed ()
+{
+	if [ -e "$savedConf" ] || [ -L "$savedConf" ]; then
+		mv -f "$savedConf" "$venusConf"
+	fi
+}
+
+cleanup ()
+{
+	if [ -n "$child" ]; then
+		kill "$child" 2> /dev/null
+		wait "$child" 2> /dev/null
+	fi
+	restoreFeed
+	rm -rf "$workDir"
+}
+
+# stop this service until the next boot
+finish ()
+{
+	cleanup
+	svc -d "$service" 2> /dev/null
+	exit 0
+}
+
+trap 'cleanup; exit 1' TERM INT
+
+# run a command in the background and wait for it, so a TERM from svc -d is
+# handled right away instead of after the command finished
+run ()
+{
+	"$@" > "$workDir/output" 2>&1 &
+	child=$!
+	wait $child
+	local status=$?
+	child=""
+	cat "$workDir/output"
+	return $status
+}
+
+pause ()
+{
+	echo "retrying in $retryDelay seconds"
+	run sleep $retryDelay > /dev/null
+}
+
+# the root file system is read only by default
+makeRootWritable ()
+{
+	if (( $(mount | grep ' / ' | grep -c 'rw') == 0 )); then
+		if [ -x /opt/victronenergy/swupdate-scripts/resize2fs.sh ]; then
+			/opt/victronenergy/swupdate-scripts/resize2fs.sh
+		else
+			mount -o remount,rw /
+		fi
+	fi
+}
+
+isInstalled ()
+{
+	opkg list-installed "$1" 2> /dev/null | grep -q "^$1 "
+}
+
+if isInstalled gui-v2; then
+	echo "gui-v2 is installed"
+	finish
+fi
+
+# use the feed that matches the firmware, not the one selected in the settings
+venusVersion=$(head -n 1 /opt/victronenergy/version)
+case "$venusVersion" in
+	*~*) feed=candidate ;;
+	*) feed=release ;;
+esac
+feedConf="/usr/share/venus-feed-configs/opkg-$feed.conf"
+if ! [ -e "$feedConf" ]; then
+	echo "ERROR: $feedConf not found - can't install gui-v2"
+	finish
+fi
+
+while true; do
+	makeRootWritable
+	restoreFeed
+	mv -f "$venusConf" "$savedConf"
+	ln -sf "$feedConf" "$venusConf"
+
+	echo "updating the package lists from the $feed feed for Venus OS $venusVersion"
+	if ! run opkg update; then
+		echo "opkg update failed - no internet connection?"
+		restoreFeed
+		pause
+		continue
+	fi
+
+	# the feed contains the latest release only: refuse when gui-v2 from it
+	# would upgrade packages of the running firmware
+	plan=$(run opkg install --noaction gui-v2)
+	if echo "$plan" | grep -q '^Upgrading'; then
+		echo "NOT installing gui-v2: the $feed feed does not match Venus OS $venusVersion,"
+		echo "it would upgrade these firmware packages:"
+		echo "$plan" | grep '^Upgrading'
+		echo "update Venus OS to the latest $feed version; the next boot retries"
+		finish
+	fi
+
+	opkg list-installed | awk '{ print $1 }' > "$workDir/before"
+	echo "installing gui-v2"
+	run opkg install gui-v2
+	status=$?
+	# record what was added, even after a partial install, so an uninstall removes it
+	opkg list-installed | awk '{ print $1 }' | grep -vxF -f "$workDir/before" >> "$installedPackagesFile"
+	restoreFeed
+
+	if (( status == 0 )) && isInstalled gui-v2; then
+		echo "gui-v2 installed - restarting the GUI"
+		svc -t /service/start-gui 2> /dev/null
+		finish
+	fi
+	echo "installing gui-v2 failed"
+	pause
+done

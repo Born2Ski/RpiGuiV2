@@ -1,0 +1,4 @@
+#!/bin/sh
+# installs gui-v2 from the Victron package feed in the background, see installGuiV2
+exec 2>&1
+exec /data/RpiGuiV2/installGuiV2

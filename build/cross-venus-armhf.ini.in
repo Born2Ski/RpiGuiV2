@@ -1,0 +1,31 @@
+# meson cross file for clang + lld against the Venus OS SDK sysroot
+#   @SYSROOT@   .../sysroots/cortexa8hf-neon-ve-linux-gnueabi
+#   @LDPATH@    an ld.lld executable
+#   @AR@ @RANLIB@ llvm-ar / llvm-ranlib (they must understand ELF)
+#   @PKGCONFIG@ pkg-config or pkgconf
+# clang finds the gcc runtime once <sysroot>/usr/lib/gcc/arm-linux-gnueabihf/13.5.0
+# links to ../../arm-ve-linux-gnueabi/13.5.0
+
+[binaries]
+c = ['clang', '--target=arm-linux-gnueabihf', '--sysroot=@SYSROOT@', '-mcpu=cortex-a7', '-mfpu=neon-vfpv4', '-mfloat-abi=hard']
+cpp = ['clang++', '--target=arm-linux-gnueabihf', '--sysroot=@SYSROOT@', '-mcpu=cortex-a7', '-mfpu=neon-vfpv4', '-mfloat-abi=hard', '-nostdinc++', '-isystem', '@SYSROOT@/usr/include/c++/13.5.0', '-isystem', '@SYSROOT@/usr/include/c++/13.5.0/arm-ve-linux-gnueabi', '-isystem', '@SYSROOT@/usr/include/c++/13.5.0/backward']
+ar = '@AR@'
+ranlib = '@RANLIB@'
+pkg-config = '@PKGCONFIG@'
+
+[built-in options]
+c_args = ['-O2', '-Wno-unused-command-line-argument']
+cpp_args = ['-O2', '-Wno-unused-command-line-argument']
+c_link_args = ['-fuse-ld=lld', '--ld-path=@LDPATH@', '-Wl,-O1', '-Wl,--hash-style=gnu', '-Wl,--as-needed', '-Wl,-s']
+cpp_link_args = ['-fuse-ld=lld', '--ld-path=@LDPATH@', '-Wl,-O1', '-Wl,--hash-style=gnu', '-Wl,--as-needed', '-Wl,-s']
+
+[properties]
+sys_root = '@SYSROOT@'
+pkg_config_libdir = '@SYSROOT@/usr/lib/pkgconfig:@SYSROOT@/usr/share/pkgconfig'
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'linux'
+cpu_family = 'arm'
+cpu = 'cortex-a7'
+endian = 'little'

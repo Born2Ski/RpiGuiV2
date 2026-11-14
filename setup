@@ -1,0 +1,277 @@
+#!/bin/bash
+
+# RpiGuiV2: hardware accelerated gui-v2 on the Raspberry Pi 2 / 3 / Zero 2 W
+#
+# Venus OS renders gui-v2 in software on these Raspberry Pis because
+#	- /u-boot/config.txt does not load the vc4 KMS display driver (vc4-kms-v3d)
+#	- the Venus OS mesa build does not include the vc4 GPU driver
+#	- Qt is configured for the plain linuxfb framebuffer
+#
+# This package
+#	- adds dtoverlay=vc4-kms-v3d and display_auto_detect=1 to /u-boot/config.txt
+#		and installs the vc4-kms-v3d / vc4-kms-dsi-7inch overlays
+#	- installs the mesa vc4 driver (/usr/lib/dri/vc4_dri.so, built for mesa 24.0.7)
+#	- configures Qt for eglfs on the vc4 KMS device (falls back to linuxfb without it)
+#	- patches display-hotplug, which assumed one connector per DRM device
+#	- installs gui-v2 from the Victron package feed, in the background by the
+#		RpiGuiV2Installer service (needs an internet connection)
+#	- replaces the gui-v1 only service with a start-gui service, so the GUI
+#		version can be selected in the settings, like on the Raspberry Pi 5
+#
+# A reboot is needed after installing or uninstalling.
+#
+# See https://github.com/victronenergy/venus/issues/1305
+
+configFile="/u-boot/config.txt"
+configBeginText="#### RpiGuiV2 begin"
+configEndText="#### RpiGuiV2 end"
+driDir="/usr/lib/dri"
+installedPackagesFile="/etc/venus/RpiGuiV2-installedPackages"
+stockGuiService="/opt/victronenergy/service/gui"
+parkedGuiService="/opt/victronenergy/RpiGuiV2-parked/gui"
+startGuiService="/opt/victronenergy/service/start-gui"
+startGuiMarker="RpiGuiV2"
+requiredMesa="2:24.0.7-"
+
+# no log file for this package
+packageLogFile=""
+
+#### following line incorporates helper resources into this script
+source "/data/SetupHelper/HelperResources/IncludeHelpers"
+#### end of lines to include helper resources
+
+
+# /u-boot/config.txt is not updated by a firmware update, so after one the lines
+# are still there; the markers make it possible to remove exactly these lines
+#
+# disable_overscan=1: with KMS the firmware passes its default overscan to the
+# kernel as 48 pixel margins, which leaves a black border on HDMI displays.
+# For a TV that needs overscan: touch $setupOptionsDir/keepOverscan and reinstall
+
+function configBlock ()
+{
+	echo "$configBeginText"
+	echo "[all]"
+	echo "dtoverlay=vc4-kms-v3d"
+	echo "display_auto_detect=1"
+	if ! [ -e "$setupOptionsDir/keepOverscan" ]; then
+		echo "disable_overscan=1"
+	fi
+	echo "$configEndText"
+}
+
+function addConfigLines ()
+{
+	if ! [ -f "$configFile" ]; then
+		setInstallFailed $EXIT_FILE_SET_ERROR "$configFile not found"
+		return
+	fi
+	if grep -q "^$configBeginText" "$configFile"; then
+		# already there: replace it only when an older version wrote other lines
+		if [ "$(sed -n "/^$configBeginText/,/^$configEndText/p" "$configFile")" == "$(configBlock)" ]; then
+			return
+		fi
+		removeConfigLines
+	elif grep -q "^dtoverlay=vc4-kms-v3d" "$configFile"; then
+		logMessage "$configFile already loads vc4-kms-v3d - leaving it unchanged"
+		return
+	fi
+	logMessage "adding the vc4 KMS overlay to $configFile"
+	# make sure the block starts on a new line
+	if [ -n "$(tail -c 1 "$configFile")" ]; then
+		echo >> "$configFile"
+	fi
+	configBlock >> "$configFile"
+	rebootNeeded=true
+}
+
+function removeConfigLines ()
+{
+	if [ -f "$configFile" ] && grep -q "^$configBeginText" "$configFile"; then
+		logMessage "removing the vc4 KMS overlay from $configFile"
+		sed -i -e "/^$configBeginText/,/^$configEndText/d" "$configFile"
+		rebootNeeded=true
+	fi
+}
+
+
+# a firmware that already has a start-gui service (like the Raspberry Pi 5) can
+# switch between gui-v1 and gui-v2 itself: leave its services alone then
+
+function stockStartGuiPresent ()
+{
+	[ -d "$startGuiService" ] && ! grep -q "$startGuiMarker" "$startGuiService/run" 2> /dev/null
+}
+
+# the stock gui service (package start-gui-v1) only runs gui-v1. It is moved out
+# of the service directory while this package is installed. It is on the root
+# file system, so a firmware update restores it and the reinstall parks it again.
+
+function parkStockGuiService ()
+{
+	if [ -d "$stockGuiService" ]; then
+		logMessage "parking the stock gui-v1 service"
+		mkdir -p "$(dirname "$parkedGuiService")"
+		rm -rf "$parkedGuiService"
+		mv "$stockGuiService" "$parkedGuiService"
+	fi
+	if [ -d /service/gui ]; then
+		svc -dx /service/gui /service/gui/log 2> /dev/null
+		rm -rf /service/gui
+	fi
+}
+
+function restoreStockGuiService ()
+{
+	if [ -d "$parkedGuiService" ]; then
+		logMessage "restoring the stock gui-v1 service"
+		rm -rf "$stockGuiService"
+		mv "$parkedGuiService" "$stockGuiService"
+		rmdir "$(dirname "$parkedGuiService")" 2> /dev/null
+	fi
+	# /service is a tmpfs copy of the service directory made at boot
+	if [ -d "$stockGuiService" ] && ! [ -d /service/gui ]; then
+		mkdir -p /service/gui
+		cp -a "$stockGuiService"/* /service/gui
+	fi
+}
+
+# the start-gui service is kept outside the services directory and installed
+# here, so SetupHelper never removes a start-gui service it didn't install
+
+function installStartGuiService ()
+{
+	logMessage "installing the start-gui service"
+	rm -rf "$startGuiService"
+	cp -R "$scriptDir/startGuiService" "$startGuiService"
+	if [ -d /service/start-gui ]; then
+		# update of this package: replace the running copy and restart it
+		cp "$scriptDir/startGuiService/run" /service/start-gui/run
+		cp "$scriptDir/startGuiService/log/run" /service/start-gui/log/run
+		svc -t /service/start-gui
+	else
+		cp -R "$scriptDir/startGuiService" /service/start-gui
+	fi
+}
+
+function removeStartGuiService ()
+{
+	if [ -d "$startGuiService" ] && grep -q "$startGuiMarker" "$startGuiService/run" 2> /dev/null; then
+		logMessage "removing the start-gui service"
+		svc -dx /service/start-gui /service/start-gui/log 2> /dev/null
+		rm -rf "$startGuiService" /service/start-gui
+	fi
+}
+
+function selectGuiV2 ()
+{
+	logMessage "selecting gui-v2 for the local display"
+	dbus-send --system --print-reply --dest=com.victronenergy.settings /Settings \
+		com.victronenergy.Settings.AddSetting string:Gui string:RunningVersion \
+		variant:int32:1 string:i variant:int32:1 variant:int32:2 &> /dev/null
+	dbus-send --system --print-reply --dest=com.victronenergy.settings /Settings/Gui/RunningVersion \
+		com.victronenergy.BusItem.SetValue variant:int32:2 &> /dev/null
+}
+
+# remove the packages the RpiGuiV2Installer service installed, nothing else
+function removeGuiV2Packages ()
+{
+	if ! [ -s "$installedPackagesFile" ]; then
+		return
+	fi
+	local remaining=( $(cat "$installedPackagesFile") )
+	logMessage "removing packages installed for gui-v2: ${remaining[*]}"
+	# packages that others still depend on are refused by opkg, so keep
+	# removing until no more progress is made
+	local passes=${#remaining[@]}
+	while (( ${#remaining[@]} > 0 && passes > 0 )); do
+		local left=()
+		local package
+		for package in "${remaining[@]}"; do
+			if opkg list-installed "$package" | grep -q "^$package " && ! opkg remove "$package" &> /dev/null; then
+				left+=( "$package" )
+			fi
+		done
+		remaining=( "${left[@]}" )
+		(( passes-- ))
+	done
+	if (( ${#remaining[@]} > 0 )); then
+		logMessage "could not remove: ${remaining[*]}"
+	fi
+	rm -f "$installedPackagesFile"
+}
+
+
+#### running manually and OK to proceed - prompt for input
+if [ $scriptAction == 'NONE' ] ; then
+	echo
+	echo "Hardware accelerated gui-v2 for the Raspberry Pi 2 / 3 / Zero 2 W:"
+	echo "  - loads the vc4 KMS display driver (/u-boot/config.txt)"
+	echo "  - installs the mesa vc4 GPU driver and configures Qt for it"
+	echo "  - installs gui-v2 from the Victron package feed (needs internet, runs in the background)"
+	echo "  - adds start-gui so gui-v1 or gui-v2 can be selected in the settings"
+	echo "A reboot is needed afterwards."
+
+	standardActionPrompt 'MORE_PROMPTS'
+
+	if [ $scriptAction == 'NONE' ]; then
+		echo
+		if yesNoPrompt "Show gui-v2 on the local display (y) or keep gui-v1 for now (n)?: " ; then
+			rm -f "$setupOptionsDir/keepGuiV1"
+		else
+			touch "$setupOptionsDir/keepGuiV1"
+		fi
+		scriptAction='INSTALL'
+	fi
+fi
+
+#### installing
+if [ $scriptAction == 'INSTALL' ] ; then
+	if [ "$machine" != "raspberrypi2" ]; then
+		setInstallFailed $EXIT_INCOMPATIBLE_PLATFORM \
+			"RpiGuiV2 is for the Raspberry Pi 2 / 3 / Zero 2 W (raspberrypi2), not $machine"
+	fi
+	if ! $installFailed; then
+		mesa=$(opkg list-installed libgbm1 2> /dev/null | awk '{ print $3 }')
+		if [[ "$mesa" != "$requiredMesa"* ]]; then
+			setInstallFailed $EXIT_INCOMPATIBLE_VERSION \
+				"the included vc4 driver is built for mesa 24.0.7, this firmware has ${mesa:-no mesa}"
+		fi
+	fi
+
+	if ! $installFailed; then
+		# updateActiveFile skips files whose directory doesn't exist
+		mkdir -p "$driDir"
+		addConfigLines
+	fi
+
+	if ! $installFailed; then
+		if stockStartGuiPresent; then
+			logMessage "this firmware has its own start-gui service - using it"
+		else
+			parkStockGuiService
+			installStartGuiService
+		fi
+		installService RpiGuiV2Installer
+		# a reinstall after a firmware update keeps the choice made in the settings
+		if ! $reinstall && ! [ -e "$setupOptionsDir/keepGuiV1" ]; then
+			selectGuiV2
+		fi
+	fi
+fi
+
+# uninstalling - check scriptAction again
+# if an install step failed package needs to be removed
+if [ $scriptAction == 'UNINSTALL' ] ; then
+	# stop a gui-v2 install that may be in progress before removing packages
+	removeService RpiGuiV2Installer
+	removeGuiV2Packages
+	removeStartGuiService
+	restoreStockGuiService
+	removeConfigLines
+	uninstallAllFiles
+	rmdir "$driDir" 2> /dev/null
+fi
+
+# thats all folks - SCRIPT EXITS INSIDE THE FUNCTION
+endScript 'INSTALL_FILES'
