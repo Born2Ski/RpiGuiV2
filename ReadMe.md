@@ -3,11 +3,11 @@
 Hardware accelerated **gui-v2** on a **Raspberry Pi 2, 3 or Zero 2 W** running
 Venus OS, as a [SetupHelper](https://github.com/kwindrem/SetupHelper) package.
 
-> **Status: beta.** Tested on a Raspberry Pi 2 Model B & Pi 3 (see issue report) with a 1080p HDMI display
-> on Venus OS v3.85: gui-v2 runs on the GPU (`VC4 V3D 2.1`). Not yet tested on a
-> RPI, a Zero 2 W or with the official 7" touchscreen. Keep a copy of your SD
-> card or a spare card, and report results in
-> [venus issue 1305](https://github.com/victronenergy/venus/issues/1305).
+> **Status: beta.** Tested on a Raspberry Pi 2 Model B and a Pi 3 (see the issue
+> report) with a 1080p HDMI display on Venus OS v3.85: gui-v2 runs on the GPU
+> (`VC4 V3D 2.1`). Not yet tested on a Zero 2 W or with the official 7"
+> touchscreen. Keep a copy of your SD card or a spare card, and report results
+> in [venus issue 1305](https://github.com/victronenergy/venus/issues/1305).
 
 ## Why
 
