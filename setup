@@ -17,6 +17,7 @@
 #		RpiGuiV2Installer service (needs an internet connection)
 #	- replaces the gui-v1 only service with a start-gui service, so the GUI
 #		version can be selected in the settings, like on the Raspberry Pi 5
+#	- optionally rotates the display by 180 degrees (setup option rotate180)
 #
 # A reboot is needed after installing or uninstalling.
 #
@@ -25,6 +26,7 @@
 configFile="/u-boot/config.txt"
 configBeginText="#### RpiGuiV2 begin"
 configEndText="#### RpiGuiV2 end"
+cmdlineFile="/u-boot/cmdline.txt"
 driDir="/usr/lib/dri"
 installedPackagesFile="/etc/venus/RpiGuiV2-installedPackages"
 stockGuiService="/opt/victronenergy/service/gui"
@@ -92,6 +94,105 @@ function removeConfigLines ()
 		sed -i -e "/^$configBeginText/,/^$configEndText/d" "$configFile"
 		rebootNeeded=true
 	fi
+}
+
+
+# Rotation by 180 degrees ($setupOptionsDir/rotate180)
+#
+# With KMS the firmware rotation settings (display_rotate, lcd_rotate) are
+# ignored, and neither gui-v2 nor Qt eglfs can rotate a Qt Quick window. The
+# kernel can: video=<connector>:<mode>,rotate=180 on its command line rotates
+# the display plane, and gui-v2 keeps that rotation. The vc4 hardware only
+# flips, so 90 and 270 degrees are not possible.
+#
+# The kernel (5.10) ignores rotate=180 without a mode, so the entry repeats the
+# mode the firmware passes for that connector (video=HDMI-A-1:1920x1080M@60),
+# including any overscan margins. Before the vc4 driver runs there is no such
+# entry and the resolution of the firmware framebuffer is used. When there are
+# several video= entries for a connector the last one counts, so ours goes at
+# the end. After changing to a display with another resolution, run the setup
+# again. An entry for a connector that isn't there is ignored.
+#
+# Touch input is rotated in /etc/profile.d/qt6.sh, which checks the same option.
+
+rotateConnectors="HDMI-A-1 DSI-1"
+
+# the video= entry the firmware passes for connector $1, without rotate=
+function firmwareVideoEntry ()
+{
+	tr ' ' '\n' < /proc/cmdline | grep "^video=$1:[0-9]" | grep -v "rotate=" | head -n 1
+}
+
+# the entry that rotates connector $1, empty when its mode isn't known
+function rotateEntry ()
+{
+	local connector=$1
+	local entry=$(firmwareVideoEntry $connector)
+	local mode="" modesFile size
+	if [ -n "$entry" ]; then
+		echo "$entry,rotate=180"
+		return
+	fi
+	modesFile=$(ls /sys/class/drm/card*-$connector/modes 2> /dev/null | head -n 1)
+	if [ -n "$modesFile" ]; then
+		mode=$(head -n 1 "$modesFile")
+	elif [ "$connector" == "DSI-1" ]; then
+		mode="800x480"		# the official 7" display
+	elif [ -f /sys/class/graphics/fb0/virtual_size ]; then
+		size=$(cat /sys/class/graphics/fb0/virtual_size)	# firmware framebuffer: 1920,1080
+		[[ "$size" =~ ^([0-9]+),([0-9]+)$ ]] && mode="${BASH_REMATCH[1]}x${BASH_REMATCH[2]}"
+	fi
+	if [[ "$mode" =~ ^[0-9]+x[0-9]+ ]]; then
+		echo "video=$connector:${BASH_REMATCH[0]},rotate=180"
+	fi
+}
+
+# true for a rotation entry for one of our connectors (also one added by hand)
+function isRotateEntry ()
+{
+	local connector
+	for connector in $rotateConnectors; do
+		[[ "$1" == video=$connector:* && "$1" == *rotate=180* ]] && return 0
+	done
+	return 1
+}
+
+function updateCmdline ()
+{
+	local add=$1
+	if ! [ -f "$cmdlineFile" ]; then
+		$add && logMessage "$cmdlineFile not found - can't rotate the display"
+		return
+	fi
+	local line=$(head -n 1 "$cmdlineFile")
+	local newLine="" word connector entry
+	set -f
+	for word in $line; do
+		isRotateEntry "$word" || newLine+="${newLine:+ }$word"
+	done
+	set +f
+	if $add; then
+		for connector in $rotateConnectors; do
+			entry=$(rotateEntry $connector)
+			if [ -n "$entry" ]; then
+				newLine+=" $entry"
+			else
+				logMessage "mode of $connector not known - not rotating it"
+			fi
+		done
+	fi
+	if [ "$newLine" == "$line" ]; then
+		return
+	fi
+	if $add; then
+		logMessage "rotating the display 180 degrees ($cmdlineFile)"
+	else
+		logMessage "removing the display rotation from $cmdlineFile"
+	fi
+	{ echo "$newLine"; tail -n +2 "$cmdlineFile"; } > "$cmdlineFile.new" \
+		&& mv "$cmdlineFile.new" "$cmdlineFile"
+	sync
+	rebootNeeded=true
 }
 
 
@@ -221,6 +322,11 @@ if [ $scriptAction == 'NONE' ] ; then
 		else
 			touch "$setupOptionsDir/keepGuiV1"
 		fi
+		if yesNoPrompt "Rotate the display 180 degrees (y/n)?: " ; then
+			touch "$setupOptionsDir/rotate180"
+		else
+			rm -f "$setupOptionsDir/rotate180"
+		fi
 		scriptAction='INSTALL'
 	fi
 fi
@@ -243,6 +349,13 @@ if [ $scriptAction == 'INSTALL' ] ; then
 		# updateActiveFile skips files whose directory doesn't exist
 		mkdir -p "$driDir"
 		addConfigLines
+	fi
+	if ! $installFailed; then
+		if [ -e "$setupOptionsDir/rotate180" ]; then
+			updateCmdline true
+		else
+			updateCmdline false
+		fi
 	fi
 
 	if ! $installFailed; then
@@ -269,6 +382,7 @@ if [ $scriptAction == 'UNINSTALL' ] ; then
 	removeStartGuiService
 	restoreStockGuiService
 	removeConfigLines
+	updateCmdline false
 	uninstallAllFiles
 	rmdir "$driDir" 2> /dev/null
 fi

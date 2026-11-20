@@ -1,3 +1,9 @@
+v1.0~4:
+	add setup option rotate180: rotates the display 180 degrees through the
+	kernel command line (video=<connector>:<mode>,rotate=180 in
+	/u-boot/cmdline.txt, repeating the mode the firmware passes) and rotates touch input in qt6.sh to match.
+	The firmware rotation settings don't work with KMS
+
 v1.0~3:
 	add disable_overscan=1 to the config.txt block: with KMS the firmware
 	otherwise passes 48 pixel margins, a black border on HDMI displays.

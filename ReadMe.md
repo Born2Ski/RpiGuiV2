@@ -28,6 +28,7 @@ busy. Three things are missing for the VideoCore IV GPU to be used:
 | `/usr/lib/dri/vc4_dri.so` | mesa 24.0.7 vc4 driver, built for Venus OS (see `build/`) |
 | `/etc/profile.d/qt6.sh`, `/etc/qt-kms.conf` | Qt `eglfs` on the vc4 KMS device, falling back to `linuxfb` when it isn't there |
 | `/lib/udev/display-hotplug` | patch: handle DRM devices with more than one connector (vc4 has HDMI, DSI and Writeback) |
+| `/u-boot/cmdline.txt` | only with the `rotate180` option: adds `video=<connector>:<mode>,rotate=180` for HDMI and the 7" display, using the mode the firmware passes |
 | gui-v2 | installed from the **Victron package feed** matching your firmware, in the background by the `RpiGuiV2Installer` service |
 | `start-gui` service | replaces the gui-v1 only `gui` service, so gui-v1 or gui-v2 can be selected in the settings (like on the Raspberry Pi 5) |
 
@@ -73,6 +74,27 @@ svc -t /service/start-gui
 
 gui-v1 is used whenever gui-v2 isn't installed yet or no display is connected
 through the vc4 KMS driver.
+
+## Rotating the display
+
+With the KMS driver the firmware rotation settings (`display_rotate`,
+`display_hdmi_rotate`, `lcd_rotate`) no longer apply. The package can rotate the
+display by **180 degrees** through the kernel command line instead (the
+command line setup asks), with touch input rotated to match:
+
+```sh
+touch /data/setupOptions/RpiGuiV2/rotate180     # rm to turn it off again
+/data/RpiGuiV2/setup install
+reboot
+```
+
+The mode of the display is written into the entry, so after changing to a
+display with another resolution run `/data/RpiGuiV2/setup install` again.
+
+90 and 270 degrees are not possible: the Pi's display hardware can only flip
+the picture, and gui-v2 has no rotation setting of its own.
+
+Tested with an HDMI display (no touch). Touch rotation is untested.
 
 ## Check it uses the GPU
 
