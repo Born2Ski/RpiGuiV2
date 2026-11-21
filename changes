@@ -1,3 +1,11 @@
+v1.0~5:
+	dimming and display off on the official 7" touchscreen: the raspberrypi2
+	firmware has no /etc/venus/backlight_device and blank_display_device, so
+	venus-platform had no brightness setting and gui-v2 reported
+	"ScreenBlanker: not supported". A udev rule records the display backlight
+	in /run/RpiGuiV2 at boot and both files link there. Without a backlight
+	(HDMI) nothing changes. Files the firmware provides are left alone
+
 v1.0~4:
 	add setup option rotate180: rotates the display 180 degrees through the
 	kernel command line (video=<connector>:<mode>,rotate=180 in

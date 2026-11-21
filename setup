@@ -18,6 +18,8 @@
 #	- replaces the gui-v1 only service with a start-gui service, so the GUI
 #		version can be selected in the settings, like on the Raspberry Pi 5
 #	- optionally rotates the display by 180 degrees (setup option rotate180)
+#	- makes the backlight of the official 7" display known to Venus, for
+#		dimming and switching the display off when idle
 #
 # A reboot is needed after installing or uninstalling.
 #
@@ -196,6 +198,67 @@ function updateCmdline ()
 }
 
 
+# Display backlight: dimming and screen off (official 7" touchscreen)
+#
+# venus-platform dims the display through /etc/venus/backlight_device and gui-v2
+# switches it off through /etc/venus/blank_display_device. The raspberrypi2
+# firmware has neither, so both were "not supported". The backlight device only
+# exists with the 7" display connected and its name depends on the driver, so
+# the files link to /run/RpiGuiV2, written at boot by a udev rule
+# (/lib/udev/rpiguiv2-backlight). Without a backlight the links point to nothing,
+# which Venus treats as "not supported", as before.
+
+venusConfDir="/etc/venus"
+backlightRunDir="/run/RpiGuiV2"
+backlightFeatures="backlight_device blank_display_device"
+
+function installBacklight ()
+{
+	local feature link linked=false
+	for feature in $backlightFeatures; do
+		link="$venusConfDir/$feature"
+		if [ -L "$link" ] && [ "$(readlink "$link")" == "$backlightRunDir/$feature" ]; then
+			continue
+		elif [ -e "$link" ] || [ -L "$link" ]; then
+			logMessage "$link is provided by the firmware - leaving it unchanged"
+			continue
+		fi
+		logMessage "linking $link to $backlightRunDir/$feature"
+		ln -s "$backlightRunDir/$feature" "$link"
+		linked=true
+	done
+	# record a backlight that is already there (the rule only runs at boot otherwise)
+	udevadm control --reload 2> /dev/null
+	udevadm trigger --subsystem-match=backlight --action=add 2> /dev/null
+	udevadm settle --timeout=5 2> /dev/null
+	if [ -s "$backlightRunDir/backlight_device" ]; then
+		logMessage "display backlight: $(cat "$backlightRunDir/backlight_device")"
+		# venus-platform reads backlight_device once at start and only then
+		# creates the brightness setting
+		if $linked && [ -d /service/venus-platform ]; then
+			svc -t /service/venus-platform
+		fi
+		# gui-v2 reads blank_display_device once at start
+		if $linked && [ -d /service/start-gui ]; then
+			svc -t /service/start-gui
+		fi
+	fi
+}
+
+function removeBacklight ()
+{
+	local feature link
+	for feature in $backlightFeatures; do
+		link="$venusConfDir/$feature"
+		if [ -L "$link" ] && [ "$(readlink "$link")" == "$backlightRunDir/$feature" ]; then
+			logMessage "removing $link"
+			rm -f "$link"
+		fi
+	done
+	rm -rf "$backlightRunDir"
+}
+
+
 # a firmware that already has a start-gui service (like the Raspberry Pi 5) can
 # switch between gui-v1 and gui-v2 itself: leave its services alone then
 
@@ -366,6 +429,12 @@ if [ $scriptAction == 'INSTALL' ] ; then
 			installStartGuiService
 		fi
 		installService RpiGuiV2Installer
+		# the udev rule and its helper have to be in place for installBacklight
+		mkdir -p /lib/udev/rules.d
+		installAllFiles
+	fi
+	if ! $installFailed; then
+		installBacklight
 		# a reinstall after a firmware update keeps the choice made in the settings
 		if ! $reinstall && ! [ -e "$setupOptionsDir/keepGuiV1" ]; then
 			selectGuiV2
@@ -381,6 +450,7 @@ if [ $scriptAction == 'UNINSTALL' ] ; then
 	removeGuiV2Packages
 	removeStartGuiService
 	restoreStockGuiService
+	removeBacklight
 	removeConfigLines
 	updateCmdline false
 	uninstallAllFiles

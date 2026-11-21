@@ -1,0 +1,22 @@
+#!/bin/sh
+# RpiGuiV2: called by udev (99-rpiguiv2-backlight.rules) for a backlight device
+#	$1: add / remove, $2: its sysfs path, e.g. /sys/devices/.../backlight/10-0045
+#
+# /etc/venus/backlight_device and /etc/venus/blank_display_device link to the
+# files written here. Without a backlight (HDMI display) the links point to
+# nothing and Venus treats dimming and screen off as not supported.
+
+dir=/run/RpiGuiV2
+case "$1" in
+	add)
+		mkdir -p $dir
+		echo "$2" > $dir/backlight_device
+		echo "$2/bl_power" > $dir/blank_display_device
+		;;
+	remove)
+		if [ "$(cat $dir/backlight_device 2> /dev/null)" = "$2" ]; then
+			rm -f $dir/backlight_device $dir/blank_display_device
+		fi
+		;;
+esac
+exit 0

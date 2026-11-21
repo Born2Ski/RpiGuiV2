@@ -3,3 +3,5 @@
 /usr/lib/dri/vc4_dri.so
 /etc/profile.d/qt6.sh
 /etc/qt-kms.conf
+/lib/udev/rules.d/99-rpiguiv2-backlight.rules
+/lib/udev/rpiguiv2-backlight

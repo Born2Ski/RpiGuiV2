@@ -5,8 +5,9 @@ Venus OS, as a [SetupHelper](https://github.com/kwindrem/SetupHelper) package.
 
 > **Status: beta.** Tested on a Raspberry Pi 2 Model B and a Pi 3 (see the issue
 > report) with a 1080p HDMI display on Venus OS v3.85: gui-v2 runs on the GPU
-> (`VC4 V3D 2.1`). Not yet tested on a Zero 2 W or with the official 7"
-> touchscreen. Keep a copy of your SD card or a spare card, and report results
+> (`VC4 V3D 2.1`), and on a Pi 3 with the official 7" touchscreen (gui-v2 and
+> touch work; dimming and screen off are new in v1.0~5 and still being tested).
+> Not yet tested on a Zero 2 W. Keep a copy of your SD card or a spare card, and report results
 > in [venus issue 1305](https://github.com/victronenergy/venus/issues/1305).
 
 ## Why
@@ -29,6 +30,7 @@ busy. Three things are missing for the VideoCore IV GPU to be used:
 | `/etc/profile.d/qt6.sh`, `/etc/qt-kms.conf` | Qt `eglfs` on the vc4 KMS device, falling back to `linuxfb` when it isn't there |
 | `/lib/udev/display-hotplug` | patch: handle DRM devices with more than one connector (vc4 has HDMI, DSI and Writeback) |
 | `/u-boot/cmdline.txt` | only with the `rotate180` option: adds `video=<connector>:<mode>,rotate=180` for HDMI and the 7" display, using the mode the firmware passes |
+| `/etc/venus/backlight_device`, `blank_display_device` | links to the backlight of the official 7" display, recorded at boot by a udev rule (`/lib/udev/rules.d/99-rpiguiv2-backlight.rules`), so the brightness setting and the display-off timeout work. The firmware has neither file; without a backlight (HDMI) the links point to nothing and both stay "not supported" |
 | gui-v2 | installed from the **Victron package feed** matching your firmware, in the background by the `RpiGuiV2Installer` service |
 | `start-gui` service | replaces the gui-v1 only `gui` service, so gui-v1 or gui-v2 can be selected in the settings (like on the Raspberry Pi 5) |
 
@@ -58,8 +60,9 @@ rm -rf /data/RpiGuiV2 && mv /data/RpiGuiV2-main /data/RpiGuiV2
 ```
 
 Reboot when asked. gui-v2 then downloads in the background; follow it with
-`tail -F /var/log/RpiGuiV2Installer/current`. When it's done the display
-switches to gui-v2. A firmware update removes the changes on the root file
+`tail -F /var/log/RpiGuiV2Installer/current`. Until it's done gui-v1 keeps
+running, which takes several minutes (about 6 on a Pi 3); then the display
+switches to gui-v2 by itself. A firmware update removes the changes on the root file
 system; PackageManager reinstalls the package and gui-v2 is downloaded again.
 
 ## Choosing gui-v1 or gui-v2
@@ -112,6 +115,9 @@ svc -u /service/start-gui
   `hdmi_cvt`, `hdmi_mode` and `lcd_rotate` (e.g. from RpiDisplaySetup) no longer
   apply. HDMI displays need a valid EDID; the official 7" touchscreen is detected
   automatically and its touch input moves to the `edt-ft5x06` driver.
+- **Brightness and display off (7" display):** under Settings → Display &
+  appearance. Check what was found with `ls -l /etc/venus/*_device` and
+  `cat /run/RpiGuiV2/*`; the start-gui log shows `ScreenBlanker: supported`.
 - **Overscan:** `disable_overscan=1` removes the black border the firmware
   otherwise adds under KMS. On a TV that cuts off the edges, keep the overscan
   with `touch /data/setupOptions/RpiGuiV2/keepOverscan`, run

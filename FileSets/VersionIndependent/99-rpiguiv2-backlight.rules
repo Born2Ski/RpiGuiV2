@@ -1,0 +1,5 @@
+# RpiGuiV2: records the display backlight (official 7" touchscreen) in
+# /run/RpiGuiV2, which /etc/venus/backlight_device and blank_display_device
+# point to, so venus-platform can dim it and gui-v2 can switch it off
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="rpiguiv2-backlight add %S%p"
+SUBSYSTEM=="backlight", ACTION=="remove", RUN+="rpiguiv2-backlight remove %S%p"
