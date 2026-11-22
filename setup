@@ -219,6 +219,11 @@ function installBacklight ()
 		link="$venusConfDir/$feature"
 		if [ -L "$link" ] && [ "$(readlink "$link")" == "$backlightRunDir/$feature" ]; then
 			continue
+		elif [ -f "$link" ] && ! [ -L "$link" ] && ! [ -e "$(head -n 1 "$link")" ]; then
+			# a file pointing to a device that isn't there, e.g. rpi_backlight written
+			# by RpiDisplaySetup: that firmware backlight doesn't exist under KMS
+			logMessage "replacing $link: $(head -n 1 "$link") does not exist"
+			rm -f "$link"
 		elif [ -e "$link" ] || [ -L "$link" ]; then
 			logMessage "$link is provided by the firmware - leaving it unchanged"
 			continue

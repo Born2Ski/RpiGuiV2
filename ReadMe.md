@@ -45,6 +45,9 @@ your firmware (the feed only holds the latest release).
   The Raspberry Pi 4 and 5 need a different GPU driver and are refused.
 - Venus OS v3.80 or later with mesa 24.0.7 (checked during install).
 - [SetupHelper](https://github.com/kwindrem/SetupHelper) installed.
+- RpiDisplaySetup **uninstalled**: its settings are for the firmware display
+  driver and don't apply under KMS, and its `rpi_backlight` dimming device
+  doesn't exist there. PackageManager reports the conflict.
 
 ## Install
 
@@ -117,7 +120,8 @@ svc -u /service/start-gui
   automatically and its touch input moves to the `edt-ft5x06` driver.
 - **Brightness and display off (7" display):** under Settings → Display &
   appearance. Check what was found with `ls -l /etc/venus/*_device` and
-  `cat /run/RpiGuiV2/*`; the start-gui log shows `ScreenBlanker: supported`.
+  `cat /run/RpiGuiV2/*` (the 7" display's backlight is `10-0045`); the
+  start-gui log shows `ScreenBlanker: supported`.
 - **Overscan:** `disable_overscan=1` removes the black border the firmware
   otherwise adds under KMS. On a TV that cuts off the edges, keep the overscan
   with `touch /data/setupOptions/RpiGuiV2/keepOverscan`, run

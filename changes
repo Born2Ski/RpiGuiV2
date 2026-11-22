@@ -1,3 +1,10 @@
+v1.0~6:
+	RpiDisplaySetup must be uninstalled (package conflict): its settings are
+	for the firmware display driver and don't apply under KMS, and it writes
+	/etc/venus/backlight_device and blank_display_device for rpi_backlight, a
+	backlight that doesn't exist under KMS (the 7" display has 10-0045), so
+	dimming and display off failed. Such stale files are now replaced
+
 v1.0~5:
 	dimming and display off on the official 7" touchscreen: the raspberrypi2
 	firmware has no /etc/venus/backlight_device and blank_display_device, so
