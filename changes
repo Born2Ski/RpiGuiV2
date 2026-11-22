@@ -1,3 +1,13 @@
+v1.0~7:
+	on-screen keyboard too large on the official 7" touchscreen, bottom row
+	cut off: gui-v2 picks its layout from the physical size Qt reports. The
+	panel reports 154 x 86 mm, which gui-v2 rounds to 7 inch and so uses the
+	1024x600 layout of the GX Touch 70 on an 800x480 panel. The Qt keyboard
+	isn't scaled down with the rest of the UI. /etc/qt-kms.conf now reports
+	a 5 inch size for the DSI display, so gui-v2 uses its native 800x480
+	layout (GX Touch 50). The DPI isn't affected (eglfs always uses 100 dpi),
+	and HDMI displays don't change
+
 v1.0~6:
 	RpiDisplaySetup must be uninstalled (package conflict): its settings are
 	for the firmware display driver and don't apply under KMS, and it writes

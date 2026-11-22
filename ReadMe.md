@@ -28,7 +28,7 @@ busy. Three things are missing for the VideoCore IV GPU to be used:
 | `/u-boot/config.txt` | adds `dtoverlay=vc4-kms-v3d`, `display_auto_detect=1` and `disable_overscan=1` between `#### RpiGuiV2 begin/end` markers |
 | `/u-boot/overlays/` | adds `vc4-kms-v3d.dtbo` and `vc4-kms-dsi-7inch.dtbo` (official 7" touchscreen) |
 | `/usr/lib/dri/vc4_dri.so` | mesa 24.0.7 vc4 driver, built for Venus OS (see `build/`) |
-| `/etc/profile.d/qt6.sh`, `/etc/qt-kms.conf` | Qt `eglfs` on the vc4 KMS device, falling back to `linuxfb` when it isn't there |
+| `/etc/profile.d/qt6.sh`, `/etc/qt-kms.conf` | Qt `eglfs` on the vc4 KMS device, falling back to `linuxfb` when it isn't there. For the 7" display, `qt-kms.conf` reports a 5" size so gui-v2 uses its 800x480 layout |
 | `/lib/udev/display-hotplug` | patch: handle DRM devices with more than one connector (vc4 has HDMI, DSI and Writeback) |
 | `/u-boot/cmdline.txt` | only with the `rotate180` option: adds `video=<connector>:<mode>,rotate=180` for HDMI and the 7" display, using the mode the firmware passes |
 | `/etc/venus/backlight_device`, `blank_display_device` | links to the backlight of the official 7" display, recorded at boot by a udev rule (`/lib/udev/rules.d/99-rpiguiv2-backlight.rules`), so the brightness setting and the display-off timeout work. The firmware has neither file; without a backlight (HDMI) the links point to nothing and both stay "not supported" |
@@ -119,6 +119,11 @@ svc -u /service/start-gui
   `hdmi_cvt`, `hdmi_mode` and `lcd_rotate` (e.g. from RpiDisplaySetup) no longer
   apply. HDMI displays need a valid EDID; the official 7" touchscreen is detected
   automatically and its touch input moves to the `edt-ft5x06` driver.
+- **Layout on the 7" display:** gui-v2 chooses its layout from the screen's
+  physical size. The official 7" touchscreen has 800x480 pixels, the size of
+  Victron's 5" GX Touch 50, not of the 7" GX Touch 70 (1024x600).
+  `/etc/qt-kms.conf` therefore reports a 5" size for the DSI display, so gui-v2
+  uses its native 800x480 layout and the on-screen keyboard fits.
 - **Brightness and display off (7" display):** under Settings → Display &
   appearance. Check what was found with `ls -l /etc/venus/*_device` and
   `cat /run/RpiGuiV2/*` (the 7" display's backlight is `10-0045`); the
